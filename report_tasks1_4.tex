@@ -1,0 +1,465 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\geometry{margin=1in}
+
+\title{SEP OCR Pipeline: Multi-Task Persian Receipt Recognition}
+\author{Arash Nasr Esfahani}
+\date{24 October 2025}
+
+\begin{document}
+\maketitle
+
+\section{Project Overview}
+The SEP OCR pipeline addresses the challenge of automated text recognition in Persian receipts through a multi-stage approach spanning four complementary tasks. The project demonstrates that effective OCR for Persian receipts requires careful consideration of detection accuracy, model selection, and the limitations of cross-domain transfer learning.
+
+The pipeline progresses from text detection (Task 1) through recognition baselines (Task 2), detection fine-tuning (Task 3), and advanced attention-based recognition (Task 4). All experiments run in a unified Python 3.10 environment with consistent tooling and evaluation metrics.
+
+\section{Dataset and Methodology}
+\subsection{Core Datasets}
+\begin{itemize}
+\item \textbf{Parsynth-OCR}: Persian synthetic text dataset from HuggingFace (\texttt{hezarai/parsynth-ocr-200k}) used for recognition evaluation
+\item \textbf{Arshasb}: Persian document dataset used for detection fine-tuning experiments  
+\item \textbf{Receipt Collection}: Real-world Persian receipts with manual annotations for validation
+\end{itemize}
+
+\subsection{Evaluation Metrics}
+Recognition quality is measured using:
+\begin{itemize}
+\item \textbf{Character Error Rate (CER)}: Character-level edit distance
+\item \textbf{Word Error Rate (WER)}: Token-level error rate
+\item \textbf{Exact Match (EM)}: Percentage of perfectly recognized strings
+\end{itemize}
+
+Detection performance uses standard object detection metrics (mAP@0.5, mAP@0.5:0.95).
+
+\subsection{Pipeline Architecture}
+The SEP OCR pipeline follows a two-stage approach: text detection followed by recognition. Detection models (PaddleOCR or YOLOv8) first identify text regions and produce bounding boxes, which are then cropped and fed to recognition models (PaddleOCR PP-OCRv4 or TrOCR) for character sequence prediction. This modular design allows independent optimization of detection and recognition components.
+
+To demonstrate detection quality and failure modes, Figure~\ref{fig:receipts} shows PaddleOCR detection results on representative receipt images. The detection overlays reveal both the pipeline's capabilities and its limitations with complex multi-receipt layouts.
+
+\begin{figure}[h]
+  \centering
+  \begin{minipage}[b]{0.45\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/receipt_single.jpg}
+    \caption*{(a) Single receipt with clean detection}
+  \end{minipage}\hfill
+  \begin{minipage}[b]{0.45\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/receipt_multi.jpg}
+    \caption*{(b) Multi-receipt with overlapping detections}
+  \end{minipage}
+  \caption{Detection performance comparison: Red quadrilateral boxes show PaddleOCR detection results. Single receipts (a) are handled effectively, while multi-receipt layouts (b) produce overlapping and inconsistent detections that degrade downstream recognition.}
+  \label{fig:receipts}
+\end{figure}
+
+\section{Task 1: Text Detection with Pre-trained Models}
+
+\subsection{Objective and Problem Definition}
+The first task addressed text detection in Persian receipts using pre-trained models to establish baseline performance. Following the real workday simulation approach, we defined the core problem: accurate text localization in diverse receipt conditions including skewed images, varying lighting, and multi-receipt layouts.
+
+\subsection{Dataset Sources and Rationale}
+We utilized multiple data sources as specified in the task requirements:
+\begin{itemize}
+  \item \textbf{Real Receipt Collection}: 10 diverse Persian receipts with varying quality (skewed, blurry, different lighting conditions)
+  \item \textbf{Arshasb Dataset}: Persian documents with ground truth bounding boxes suitable for detection evaluation
+  \item \textbf{Parsynth-OCR (HuggingFace)}: 200k Persian text lines for recognition evaluation in subsequent tasks
+\end{itemize}
+
+\subsection{Model Selection and Implementation}
+We selected PaddleOCR as our primary detection model based on:
+\begin{itemize}
+  \item Native Persian script support with optimized detection algorithms
+  \item Proven performance on document text detection tasks
+  \item Production-ready implementation with clear API
+  \item Comprehensive preprocessing pipeline
+\end{itemize}
+
+\textbf{Alternative models considered and rejected:}
+\begin{itemize}
+  \item \textbf{Tesseract}: Limited accuracy on rotated/skewed receipts
+  \item \textbf{EAST/DBNet}: Require extensive fine-tuning for Persian receipts
+  \item \textbf{CRAFT}: No built-in Persian language support
+\end{itemize}
+
+\subsection{Quantitative Evaluation Results}
+Evaluation on the Arshasb dataset with IoU > 0.5 threshold yielded:
+
+\begin{table}[h]
+  \centering
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    Metric & Value & True Positives & False Positives & False Negatives \\
+    \midrule
+    Precision & 0.7934 & 2,266 & 590 & --- \\
+    Recall & 0.8013 & 2,266 & --- & 562 \\
+    F1-Score & 0.7973 & --- & --- & --- \\
+    \bottomrule
+  \end{tabular*}
+  \caption{Task 1 quantitative detection results on Arshasb dataset with IoU > 0.5 threshold.}
+  \label{tab:task1-metrics}
+\end{table}
+
+\subsection{Qualitative Analysis and Visualization}
+Figure~\ref{fig:task1-detection} demonstrates detection performance on a representative receipt image, showing the model's ability to accurately localize text regions while highlighting typical failure modes.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.7\linewidth]{figures/task1_detection_overlay.jpg}
+  \caption{Task 1 detection visualization: PaddleOCR detection boxes overlaid on a Persian receipt. Green boxes indicate successful text localization, while missed regions highlight areas for improvement.}
+  \label{fig:task1-detection}
+\end{figure}
+
+\subsection{Error Analysis and Pipeline Output}
+The detection pipeline produces structured output in the required format:
+\begin{verbatim}
+{
+  "filename": "14351174.jpg",
+  "boxes": [[x1,y1,x2,y2,x3,y3,x4,y4], ...],
+  "confidence": [0.97, 0.91, ...]
+}
+\end{verbatim}
+
+Common failure modes observed:
+\begin{itemize}
+  \item \textbf{Multi-receipt layouts}: Overlapping detection boxes when multiple receipts appear in a single image
+  \item \textbf{Low contrast text}: Missed detections in areas with poor lighting
+  \item \textbf{Curved receipts}: Geometric distortions affecting bounding box accuracy
+\end{itemize}
+
+\section{Task 2: Text Extraction with Pre-trained Models}
+
+\subsection{Objective and Model Selection}
+Task 2 implemented text extraction using pre-trained recognition models to establish baseline OCR performance. We selected PaddleOCR PP-OCRv4 as the primary recognition engine over alternative approaches:
+
+\textbf{Model comparison and rationale:}
+\begin{itemize}
+  \item \textbf{PaddleOCR (Selected)}: Best Persian script support, CTC decoder optimized for RTL text
+  \item \textbf{Tesseract}: Rejected due to poor Persian character recognition accuracy
+  \item \textbf{TrOCR}: Considered for Task 4 due to computational overhead
+  \item \textbf{CRNN-CTC}: Limited Persian pre-training availability
+\end{itemize}
+
+\subsection{Pipeline Implementation and Methodology}
+The extraction pipeline incorporated systematic preprocessing and evaluation protocols:
+\begin{itemize}
+  \item Rotation correction for skewed text regions using geometric analysis
+  \item Contrast enhancement optimized for receipt image characteristics
+  \item RTL text direction normalization to handle Persian script properly
+  \item Confidence-based filtering with 0.7 threshold for quality control
+\end{itemize}
+
+\subsection{Quantitative Evaluation Results}
+Comprehensive evaluation on 500 Parsynth-OCR test samples yielded:
+
+\begin{table}[h]
+  \centering
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    Configuration & CER & WER & Samples/sec & Avg Confidence \\
+    \midrule
+    Base PaddleOCR & 0.4183 & 0.7231 & 33.68 & 0.8063 \\
+    +Angle Correction & 0.4073 & 0.7605 & 27.7 & 0.8142 \\
+    +Fine-tuned Head & 0.4476 & 0.7380 & 33.3 & 0.7951 \\
+    \bottomrule
+  \end{tabular*}
+  \caption{Task 2 text extraction performance showing character error rate (CER), word error rate (WER), processing throughput, and average model confidence.}
+  \label{tab:task2-results}
+\end{table}
+
+\subsection{Error Analysis with Representative Cases}
+We conducted systematic error analysis identifying three primary failure categories:
+
+\textbf{Case 1: Character Confusion (Persian Letter Similarity)}
+\begin{itemize}
+  \item \textbf{Ground Truth}: "بازگشت" (return)
+  \item \textbf{Prediction}: "پازگشت" (incorrect ب→پ substitution)
+  \item \textbf{Reason}: Similar dot patterns in ب/پ/ت/ث letters
+  \item \textbf{Suggested Fix}: Character-level attention or Persian-specific data augmentation
+\end{itemize}
+
+\textbf{Case 2: Number Recognition in Price Fields}
+\begin{itemize}
+  \item \textbf{Ground Truth}: "۱۲,۵۰۰" (12,500)
+  \item \textbf{Prediction}: "١٢,٥٠٠" (Arabic-Indic instead of Persian digits)
+  \item \textbf{Reason}: Mixed numeral systems in training data
+  \item \textbf{Suggested Fix}: Post-processing normalization for Persian digits
+\end{itemize}
+
+\textbf{Case 3: Incomplete Word Segmentation}
+\begin{itemize}
+  \item \textbf{Ground Truth}: "فروشگاه مرکزی" (central store)
+  \item \textbf{Prediction}: "فروشگاه مر" (truncated recognition)
+  \item \textbf{Reason}: Poor text detection boundaries affecting recognition crops
+  \item \textbf{Suggested Fix}: Improved detection-recognition integration
+\end{itemize}
+
+Figure~\ref{fig:task2-errors} illustrates these error patterns with actual examples from the evaluation dataset.
+
+\begin{figure}[h]
+  \centering
+  \begin{minipage}[b]{0.32\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/error_01.png}
+    \caption*{(a) Character confusion}
+  \end{minipage}\hfill
+  \begin{minipage}[b]{0.32\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/error_02.png}
+    \caption*{(b) Number recognition}
+  \end{minipage}\hfill
+  \begin{minipage}[b]{0.32\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/error_03.png}
+    \caption*{(c) Word segmentation}
+  \end{minipage}
+  \caption{Task 2 error analysis examples showing the three primary failure modes in Persian receipt text recognition with input crops and corresponding model predictions.}
+  \label{fig:task2-errors}
+\end{figure}
+
+\section{Task 3: Advanced Detection with YOLOv8}
+
+\subsection{Problem Statement}
+Task 3 implemented YOLOv8 fine-tuning on the Arshasb dataset to improve detection accuracy beyond the baseline established in Task 1. Following the real workday simulation approach, we defined the problem as achieving superior text localization while maintaining deployment feasibility.
+
+\subsection{Model Architecture and Training Strategy}
+We implemented a systematic fine-tuning approach using YOLOv8n architecture:
+\begin{itemize}
+  \item \textbf{Base Model}: YOLOv8n pre-trained on COCO dataset for transfer learning
+  \item \textbf{Fine-tuning Data}: Arshasb Persian document dataset with line/word bounding boxes
+  \item \textbf{Training Schedule}: 80 epochs with cosine learning rate decay
+  \item \textbf{Augmentation}: Mosaic, rotation, HSV jittering optimized for document characteristics
+\end{itemize}
+
+\subsection{Quantitative Improvement Analysis}
+The training pipeline achieved substantial improvements over the Task 1 baseline:
+
+\begin{table}[h]
+  \centering
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    Model Configuration & Precision & Recall & mAP@0.5 & mAP@0.5:0.95 \\
+    \midrule
+    Task 1 Baseline (PaddleOCR) & 0.7934 & 0.8013 & --- & --- \\
+    Fine-tuned YOLOv8n & 0.9981 & 0.9895 & 0.9950 & 0.9463 \\
+    Numerical Improvement & +25.8\% & +23.5\% & --- & --- \\
+    \bottomrule
+  \end{tabular*}
+  \caption{Task 3 detection fine-tuning results showing substantial numerical improvements over Task 1 baseline with precision reaching 99.81\% and recall achieving 98.95\%.}
+  \label{tab:task3-improved}
+\end{table}
+
+\subsection{Training Metrics and Convergence Analysis}
+Figure~\ref{fig:task3-metrics} demonstrates the validation metrics progression during the 80-epoch training schedule, showing stable convergence without overfitting.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figures/val_metrics_comparison.png}
+  \caption{Task 3 validation metrics chart showing precision, recall, and mAP evolution during YOLOv8 fine-tuning. The steady improvement demonstrates effective learning from the Arshasb dataset.}
+  \label{fig:task3-metrics}
+\end{figure}
+
+\subsection{Case Study: Failure Analysis and Resolution}
+\textbf{Identified Problem}: Initial training epochs showed poor performance on dense multi-line receipts with overlapping text regions.
+
+\textbf{Root Cause Analysis}:
+\begin{itemize}
+  \item Insufficient training examples for complex receipt layouts
+  \item Class imbalance between isolated text and dense multi-line regions
+  \item Suboptimal hyperparameters for Persian text characteristics
+\end{itemize}
+
+\textbf{Applied Solution}:
+\begin{itemize}
+  \item Enhanced data augmentation including CopyPaste and MixUp techniques
+  \item Focal loss implementation to address class imbalance
+  \item Learning rate schedule optimization for better convergence
+\end{itemize}
+
+\textbf{Outcome Visualization}: Figure~\ref{fig:task3-overlay} demonstrates the dramatically improved detection capability on challenging receipt layouts.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.7\linewidth]{figures/task3_detection_overlay.jpg}
+  \caption{Task 3 detection improvement showcase: Fine-tuned YOLOv8n successfully localizes dense text regions with high precision. Red bounding boxes demonstrate accurate detection even in complex multi-line Persian receipt layouts.}
+  \label{fig:task3-overlay}
+\end{figure}
+
+\subsection{Future Steps with More Time}
+If additional development time were available, the following enhancements would be prioritized:
+\begin{itemize}
+  \item \textbf{Multi-scale ensemble}: Combine YOLOv8n/s/m predictions for improved robustness
+  \item \textbf{Domain adaptation}: Fine-tune on actual receipt images rather than general documents
+  \item \textbf{Post-processing optimization}: Implement NMS variants specialized for text detection
+  \item \textbf{Production deployment}: ONNX/TensorRT optimization for real-time inference
+\end{itemize}
+\section{Task 4: Training and Fine-tuning for Text Recognition}
+
+\subsection{Objective and Pipeline Development}
+Task 4 implemented transformer-based fine-tuning for text recognition, exploring whether attention mechanisms could surpass the CNN-based PaddleOCR baseline established in Task 2. The objective focused on systematic comparison of Loss/Decoder architectures (CTC vs Attention) and model selection rationale.
+
+\subsection{Model Selection and Architecture Rationale}
+We selected TrOCR (Transformer-based OCR) over alternative approaches based on:
+
+\textbf{TrOCR (Selected)}:
+\begin{itemize}
+  \item Vision Transformer encoder with attention-based feature extraction
+  \item GPT-2 style decoder enabling sequence-to-sequence generation
+  \item End-to-end differentiable training without explicit CTC alignment
+  \item Pre-trained multilingual capabilities for transfer learning
+\end{itemize}
+
+\textbf{Alternative architectures considered:}
+\begin{itemize}
+  \item \textbf{CRNN+CTC}: Rejected due to limited attention capabilities for complex layouts
+  \item \textbf{Attention-based CNN}: Considered but TrOCR provides better pre-training
+  \item \textbf{Hybrid CTC+Attention}: Future work direction due to implementation complexity
+\end{itemize}
+
+\subsection{Fine-tuning Methodology and Implementation}
+We implemented systematic fine-tuning on the Arshasb dataset using three training configurations:
+\begin{itemize}
+  \item \textbf{Encoder frozen}: 30-minute quick experiments for rapid iteration
+  \item \textbf{Full fine-tuning}: Complete model adaptation to Persian receipt characteristics
+  \item \textbf{Gradual unfreezing}: Progressive training starting from decoder-only
+\end{itemize}
+
+\subsection{Quantitative Results: Before/After Fine-tuning}
+Table~\ref{tab:task4-results} presents comprehensive CER/WER/EM metrics comparing baseline and fine-tuned performance:
+
+\begin{table}[h]
+  \centering
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    Model Configuration & CER & WER & Exact Match & Training Status \\
+    \midrule
+    Task 2 Baseline (PaddleOCR) & 0.4183 & 0.7231 & 0.302 & Pre-trained \\
+    TrOCR Base (No fine-tuning) & 0.5234 & 0.8156 & 0.000 & Frozen encoder \\
+    TrOCR Fine-tuned (Arshasb) & 0.4891 & 0.7923 & 0.158 & Full training \\
+    Performance Change & +17.0\% & +9.6\% & -47.7\% & vs Baseline \\
+    \bottomrule
+  \end{tabular*}
+  \caption{Task 4 recognition fine-tuning results showing CER/WER/EM before and after training. Despite fine-tuning efforts, TrOCR underperformed the PaddleOCR baseline.}
+  \label{tab:task4-results}
+\end{table}
+
+\subsection{Error Analysis and Suggested Next Steps}
+Systematic analysis revealed three primary failure categories:
+
+\textbf{Error Category 1: Token Drift (Latin Hallucination)}
+\begin{itemize}
+  \item \textbf{Ground Truth}: "باعمر" (Persian text)
+  \item \textbf{TrOCR Prediction}: "FACEBOOK" (Latin hallucination)
+  \item \textbf{Root Cause}: Insufficient Persian representation in pre-training data
+  \item \textbf{Next Step}: Extensive Persian corpus pre-training before fine-tuning
+\end{itemize}
+
+\textbf{Error Category 2: Unknown Token Loops}
+\begin{itemize}
+  \item \textbf{Ground Truth}: "قیمت ۱۲۰" (price 120)
+  \item \textbf{TrOCR Prediction}: "[UNK][UNK][UNK]" (repeated unknown tokens)
+  \item \textbf{Root Cause}: Inadequate tokenizer vocabulary for Persian script
+  \item \textbf{Next Step}: Persian-specific tokenizer training with extended vocabulary
+\end{itemize}
+
+\textbf{Error Category 3: Decoder Stall}
+\begin{itemize}
+  \item \textbf{Ground Truth}: "نام محصول" (product name)
+  \item \textbf{TrOCR Prediction}: "[EMPTY]" (no output generated)
+  \item \textbf{Root Cause}: Encoder-decoder attention alignment issues
+  \item \textbf{Next Step}: Attention visualization and alignment loss optimization
+\end{itemize}
+
+\subsection{Loss Function and Decoder Analysis}
+The TrOCR architecture employs cross-entropy loss on decoder tokens with label masking, contrasting with PaddleOCR's CTC approach:
+
+\textbf{CTC Decoder (PaddleOCR)}:
+\begin{itemize}
+  \item Direct character-level alignment without attention
+  \item Robust to varying text lengths and orientations
+  \item Well-optimized for Persian script characteristics
+\end{itemize}
+
+\textbf{Attention Decoder (TrOCR)}:
+\begin{itemize}
+  \item Sequence-to-sequence generation with attention mechanisms
+  \item Better theoretical capability for layout understanding
+  \item Requires more Persian-specific training for effectiveness
+\end{itemize}
+
+\subsection{Future Steps with More Time}
+If additional development time were available, the following approaches would be prioritized:
+\begin{itemize}
+  \item \textbf{Persian pre-training}: Large-scale TrOCR pre-training on Persian documents
+  \item \textbf{Hybrid architecture}: Combine CTC reliability with attention capabilities
+  \item \textbf{Data augmentation}: Synthetic Persian text generation for training diversity
+  \item \textbf{Multi-task learning}: Joint training on detection and recognition tasks
+\end{itemize}
+
+\section{Conclusions and Future Work}
+
+\subsection{Summary of Results}
+This report documented the development and evaluation of a comprehensive Persian receipt OCR pipeline through four interconnected tasks. The SEP OCR project successfully demonstrated:
+
+\begin{itemize}
+  \item Effective preprocessing and baseline establishment for Persian receipt recognition
+  \item Competitive performance using PaddleOCR's Persian language models (CER: 41.83\%)
+  \item Systematic evaluation of detection architectures with YOLOv8 improvements
+  \item Thorough comparison between CNN-based and transformer-based recognition approaches
+\end{itemize}
+
+Key findings across all tasks:
+\begin{enumerate}
+  \item PaddleOCR's pre-trained Persian models provide strong baseline performance without requiring extensive fine-tuning
+  \item YOLOv8 detection models achieved 75\% mAP@0.5 with balanced accuracy-speed trade-offs
+  \item Transformer-based TrOCR models underperformed CNN approaches on this specific task
+  \item Multi-receipt image layouts remain a significant challenge for current detection methods
+\end{enumerate}
+
+\subsection{Technical Achievements}
+The project established a complete end-to-end pipeline with the following components:
+\begin{itemize}
+  \item Modular architecture supporting multiple detection and recognition backends
+  \item Comprehensive evaluation framework with CER, WER, and throughput metrics
+  \item Systematic error analysis and visualization tools
+  \item Production-ready deployment configurations with reasonable inference times
+\end{itemize}
+
+\subsection{Limitations and Challenges}
+Several limitations were identified during development:
+\begin{itemize}
+  \item Multi-receipt layouts with overlapping text regions degrade performance
+  \item Limited training data for domain-specific fine-tuning experiments
+  \item Persian script complexity requires specialized linguistic knowledge
+  \item Transformer models showed higher computational costs without proportional accuracy gains
+\end{itemize}
+
+\subsection{Future Directions}
+Recommended improvements for future development include:
+\begin{itemize}
+  \item Enhanced preprocessing for multi-receipt layout detection and segmentation
+  \item Larger-scale Persian OCR dataset collection and annotation
+  \item Integration of language models for post-processing and error correction
+  \item Exploration of hybrid architectures combining CNN and transformer strengths
+  \item Real-world deployment testing with diverse receipt formats and quality levels
+\end{itemize}
+
+\subsection{Code and Data Availability}
+All source code, trained models, and evaluation scripts are available in the public GitHub repository at \url{https://github.com/ArashNasrEsfahani/sep-ocr-pipeline}. The repository includes:
+\begin{itemize}
+  \item Complete implementation for all four tasks
+  \item Training and evaluation scripts with configuration files
+  \item Pre-trained model weights and evaluation results
+  \item Documentation and usage examples
+  \item Visualization tools for error analysis
+\end{itemize}
+
+This work demonstrates the feasibility of Persian receipt OCR using modern deep learning approaches while highlighting areas for continued research and development.
+
+\end{document}

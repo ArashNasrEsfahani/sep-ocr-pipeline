@@ -1,0 +1,96 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyTorch
+*.pth
+*.pt
+*.ckpt
+
+# Data files - exclude all data files except configs
+*.csv
+*.jsonl
+*.json
+!requirements*.txt
+!*config*.json
+!*.yaml
+
+# Large datasets and images - exclude all images from data directories
+task*/data/
+dataSample/
+*/images/
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+
+# Excel files from datasets
+*.xlsx
+*.xls
+
+# Text files from datasets  
+task*/data/**/*.txt
+
+# Model artifacts
+*/artifacts/
+*/lightning_logs/
+*/checkpoints/
+*/weights/
+*/models/*.pth
+*/models/*.pt
+
+# Cache files
+*.cache
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Large files
+*.zip
+*.tar.gz
+*.rar
+
+# Keep only essential documentation images
+!figures/*.jpg
+!figures/*.png
+!figures/*.jpeg
+
+# Keep READMEs and requirements
+!README*.md
+!requirements*.txt
