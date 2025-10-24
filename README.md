@@ -54,7 +54,6 @@ See individual task READMEs for detailed instructions.
 |-------|-----|-----|-----|
 | PaddleOCR Baseline | 0.418 | 0.723 | 0.302 |
 | TrOCR V2 (frozen) | 0.999 | 1.104 | 0.000 |
-| TrOCR V3 (trainable) | pending | pending | pending |
 
 ## Documentation
 
